@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-# 
-# dockman.py docker manager to start/stop YML files 
-#
-
 import subprocess
 import re
 import sys
+import os
 
-# Known containers: name -> compose file directory
-CONTAINERS = {
-    "vpn-syd": "/opt/vpn-syd",
-    "vpn-neth": "/opt/vpn-neth",
-    "vpn-nz": "/opt/vpn-nz",
-}
+DOCKERS_ROOT = "/opt/dockers"
+
+
+def discover_containers():
+    """Scan DOCKERS_ROOT for subdirs that contain docker-compose.yml."""
+    result = {}
+    try:
+        entries = sorted(os.scandir(DOCKERS_ROOT), key=lambda e: e.name)
+    except FileNotFoundError:
+        return result
+    for entry in entries:
+        if entry.is_dir() and os.path.isfile(os.path.join(entry.path, "docker-compose.yml")):
+            result[entry.name] = entry.path
+    return result
+
+
+CONTAINERS = discover_containers()
 
 # ANSI colours
 YELLOW = "\033[33m"
