@@ -179,8 +179,16 @@ def main():
         elif raw in ("2", "stop"):
             action = "stop"
             running = get_running_containers()
+            if not running:
+                print("  nothing running.")
+                break
             running_names = [c["name"] for c in running if c["name"] in CONTAINERS]
-            targets = prompt_container(names=running_names)
+            if len(running_names) == 1:
+                default_name = running_names[0]
+                choice = input(f"\n  Stop {default_name}? (Enter to confirm, anything else to cancel): ").strip()
+                targets = [default_name] if choice == "" else None
+            else:
+                targets = prompt_container(names=running_names)
         elif raw in ("3", "down"):
             action = "down"
             targets = prompt_container()
@@ -194,6 +202,9 @@ def main():
         print()
         for name in targets:
             compose_action(action, name)
+
+        if action == "start":
+            break
 
 
 if __name__ == "__main__":
