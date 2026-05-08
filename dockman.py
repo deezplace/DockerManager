@@ -203,7 +203,8 @@ def main():
         for name in targets:
             compose_action(action, name)
 
-        if action == "start":
+        if action in ("start", "stop", "down"):
+            display_status()
             break
 
 
