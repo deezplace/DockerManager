@@ -3,6 +3,7 @@ import subprocess
 import re
 import sys
 import os
+import shutil
 
 DOCKERS_ROOT = "/opt/dockers"
 
@@ -23,10 +24,27 @@ def discover_containers():
 CONTAINERS = discover_containers()
 
 # ANSI colours
+GREEN  = "\033[32m"
 YELLOW = "\033[33m"
 BLUE   = "\033[34m"
 BOLD   = "\033[1m"
 RESET  = "\033[0m"
+
+
+def term_width():
+    return shutil.get_terminal_size(fallback=(80, 24)).columns
+
+
+def clear_screen():
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+
+def print_header():
+    width = term_width()
+    title = "Docker Manager"
+    print(f"{BOLD}{title.center(width)}{RESET}")
+    print("-" * width)
 
 
 def get_running_containers():
@@ -65,6 +83,10 @@ def parse_uptime(status):
     return m.group(1).strip() if m else status
 
 
+def is_healthy(status):
+    return "(healthy)" in status.lower()
+
+
 def is_unhealthy(status):
     return "(unhealthy)" in status.lower()
 
@@ -81,16 +103,19 @@ def display_status():
 
         host_ports = extract_host_ports(ports)
         uptime     = parse_uptime(status)
+        healthy    = is_healthy(status)
         unhealthy  = is_unhealthy(status)
 
         if host_ports:
-            name_colour = YELLOW if unhealthy else BLUE
+            name_colour = YELLOW if unhealthy else (GREEN if healthy else BLUE)
             coloured_name  = f"{name_colour}{name}{RESET}"
             coloured_ports = f"{BLUE}" + ", ".join(host_ports) + f"{RESET}"
             parts = [coloured_name, "on", coloured_ports]
         else:
             parts = [name]
-        if unhealthy:
+        if healthy:
+            parts.append(f"{GREEN}[healthy]{RESET}")
+        elif unhealthy:
             parts.append(f"{YELLOW}[unhealthy]{RESET}")
         parts.append(uptime)
 
@@ -157,8 +182,9 @@ def prompt_container(names=None):
 
 
 def main():
-    print("do_manager.py - Docker Manager")
     while True:
+        clear_screen()
+        print_header()
         display_status()
         print("  1. Start a container")
         print("  2. Stop a container")
@@ -168,10 +194,10 @@ def main():
 
         raw = input("\n  Choice: ").strip().lower()
 
-        if raw in ("5", "exit", "q", "quit", ""):
+        if raw in ("5", "exit", "q", "quit"):
             print("  Bye.")
             break
-        elif raw in ("4", "refresh", "r"):
+        elif raw in ("4", "refresh", "r", ""):
             continue
         elif raw in ("1", "start"):
             action = "start"
@@ -180,8 +206,8 @@ def main():
             action = "stop"
             running = get_running_containers()
             if not running:
-                print("  nothing running.")
-                break
+                input("\n  Nothing running. Press Enter to continue...")
+                continue
             running_names = [c["name"] for c in running if c["name"] in CONTAINERS]
             if len(running_names) == 1:
                 default_name = running_names[0]
@@ -193,7 +219,7 @@ def main():
             action = "down"
             targets = prompt_container()
         else:
-            print("  Invalid choice.")
+            input("  Invalid choice. Press Enter to continue...")
             continue
 
         if targets is None:
@@ -203,10 +229,12 @@ def main():
         for name in targets:
             compose_action(action, name)
 
-        if action in ("start", "stop", "down"):
-            display_status()
-            break
+        input("  Press Enter to continue...")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n  user chose to exit")
+        sys.exit(0)
