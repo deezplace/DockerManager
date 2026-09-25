@@ -4,6 +4,7 @@ import re
 import sys
 import os
 import shutil
+import argparse
 
 DOCKERS_ROOT = "/opt/dockers"
 
@@ -123,6 +124,49 @@ def display_status():
     print()
 
 
+def get_all_containers():
+    """Return every container (running or not) with its compose working dir."""
+    result = subprocess.run(
+        ["docker", "ps", "-a", "--format",
+         '{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Label "com.docker.compose.project.working_dir"}}'],
+        capture_output=True,
+        text=True,
+    )
+    containers = []
+    for line in result.stdout.strip().splitlines():
+        if not line:
+            continue
+        parts = line.split("\t") + [""] * 4
+        containers.append({
+            "name":        parts[0],
+            "state":       parts[1],
+            "status":      parts[2],
+            "working_dir": parts[3],
+        })
+    return containers
+
+
+def display_container_list():
+    """List every compose project under DOCKERS_ROOT and its containers' states."""
+    all_containers = get_all_containers()
+    print()
+    if not CONTAINERS:
+        print(f"  No compose projects found in {DOCKERS_ROOT}.")
+    for project, path in CONTAINERS.items():
+        print(f"  {BOLD}{project}{RESET}")
+        members = [
+            c for c in all_containers
+            if c["working_dir"] == path or c["name"] == project
+        ]
+        if not members:
+            print("      (not created)")
+        width = max((len(c["name"]) for c in members), default=0)
+        for c in members:
+            colour = GREEN if c["state"] == "running" else ""
+            print(f"      {colour}{c['name'].ljust(width)}{RESET}  {c['status']}")
+    print()
+
+
 def run_command(cmd):
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd)
@@ -181,23 +225,53 @@ def prompt_container(names=None):
         print("  Invalid choice, try again.")
 
 
-def main():
+def ensure_started(name):
+    """Start `name` via compose if it isn't already running.
+
+    Returns a notice line for the menu screen, or None if nothing to report.
+    """
+    if name not in CONTAINERS:
+        return f"{YELLOW}no container by that name: {name}{RESET}"
+    running_names = [c["name"] for c in get_running_containers()]
+    if name in running_names:
+        return None
+    compose_action("start", name)
+    return f"{GREEN}started {name}{RESET}"
+
+
+def main(notice=None):
     while True:
         clear_screen()
         print_header()
         display_status()
+        if notice:
+            print(f"  {notice}\n")
+            notice = None
         print("  1. Start a container")
         print("  2. Stop a container")
         print("  3. Down a container")
         print("  4. Refresh")
-        print("  5. Exit")
+        print("  5. List containers")
+        print("  6. Exit")
 
         raw = input("\n  Choice: ").strip().lower()
 
-        if raw in ("5", "exit", "q", "quit"):
+        if raw in ("6", "exit", "q", "quit"):
+            running_names = [c["name"] for c in get_running_containers() if c["name"] in CONTAINERS]
+            if len(running_names) == 1:
+                only_name = running_names[0]
+                stop_choice = input(
+                    f"  Stop {only_name} before exiting? (Y/n): "
+                ).strip().lower()
+                if stop_choice in ("", "y", "yes"):
+                    compose_action("stop", only_name)
             print("  Bye.")
             break
         elif raw in ("4", "refresh", "r", ""):
+            continue
+        elif raw in ("5", "list", "l"):
+            display_container_list()
+            input("  Press Enter to continue...")
             continue
         elif raw in ("1", "start"):
             action = "start"
@@ -225,16 +299,42 @@ def main():
         if targets is None:
             continue
 
+        running_before = [c["name"] for c in get_running_containers() if c["name"] in CONTAINERS]
+        closing_last = (
+            action in ("stop", "down")
+            and len(running_before) == 1
+            and running_before[0] in targets
+        )
+
         print()
         for name in targets:
             compose_action(action, name)
+
+        if closing_last:
+            last_name = running_before[0]
+            quit_choice = input(
+                f"  {last_name} was the only running container. Quit? (Y/n): "
+            ).strip().lower()
+            if quit_choice in ("", "y", "yes"):
+                print("  Bye.")
+                break
+            restart_choice = input(
+                f"  Start {last_name} again? (Y/n): "
+            ).strip().lower()
+            if restart_choice in ("", "y", "yes"):
+                compose_action("start", last_name)
 
         input("  Press Enter to continue...")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Docker Manager")
+    parser.add_argument("--start", metavar="NAME",
+                        help="start this container if it isn't already running")
+    args = parser.parse_args()
     try:
-        main()
+        notice = ensure_started(args.start) if args.start else None
+        main(notice)
     except KeyboardInterrupt:
         print("\n  user chose to exit")
         sys.exit(0)
